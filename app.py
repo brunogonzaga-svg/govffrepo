@@ -1,9 +1,25 @@
 import streamlit as st
+import pandas as pd
 
 st.set_page_config(page_title="Change Request Prioritization Engine", layout="wide")
 
 st.title("🔧 Change Request Prioritization Engine")
 st.markdown("Use the form below to calculate a priority score (P0–P4).")
+
+# -----------------------------
+# LOAD GOOGLE SHEET
+# -----------------------------
+sheet_csv_url = "https://docs.google.com/spreadsheets/d/1jElAUHxHpOxld2RzMfJEwNQez_33E_LiinWw9eUdJoE/export?format=csv"
+
+df_rpa = pd.read_csv(sheet_csv_url)
+
+# Create RPA label: A + B + C
+df_rpa["RPA_Label"] = (
+    df_rpa["RPA-number"] + " - " + df_rpa["RPA-name"] + " - " + df_rpa["Team"]
+)
+
+# Map RPA → workload
+rpa_workload_map = dict(zip(df_rpa["RPA_Label"], df_rpa["3M Workload"]))
 
 # -----------------------------
 # LOOKUP TABLES
@@ -32,8 +48,9 @@ escalation_scores = {
 }
 
 # -----------------------------
-# SPLIT SCREEN LAYOUT
+# SPLIT SCREEN UI
 # -----------------------------
+
 left, right = st.columns(2)
 
 with left:
@@ -42,7 +59,7 @@ with left:
 
         request_id = st.text_input("Request ID / Title")
 
-        # No preselected values → "" is added as first option
+        # Mandatory fields with no preselection ("" first)
         impact = st.selectbox(
             "Impact Description (Mandatory)",
             [""] + list(impact_scores.keys()),
@@ -61,18 +78,33 @@ with left:
             index=0  # Defaults to "None"
         )
 
+        # NEW: RPA picklist
+        rpa = st.selectbox(
+            "RPA (Auto-fills workload if selected)",
+            [""] + list(df_rpa["RPA_Label"]),
+            index=0
+        )
+
+        # Auto-fill based on RPA
+        auto_workload = rpa_workload_map.get(rpa, "")
+
+        # Workload field (editable)
         workload_3m = st.number_input(
             "Workload Handled (3M)",
-            min_value=0, max_value=100000, step=1
+            min_value=0,
+            max_value=100000,
+            step=1,
+            value=auto_workload if auto_workload != "" else 0
         )
 
         team_workload = st.number_input(
             "Team Workload %",
-            min_value=0, max_value=100, step=1
+            min_value=0,
+            max_value=100,
+            step=1
         )
 
         submitted = st.form_submit_button("Calculate Priority")
-
 
 with right:
     st.subheader("Priority Output")
@@ -80,23 +112,23 @@ with right:
     if submitted:
 
         # -----------------------------
-        # Validation (Mandatory fields)
+        # VALIDATION
         # -----------------------------
         if impact == "" or urgency == "":
             st.error("❌ Please select both Impact and Urgency (mandatory fields).")
         else:
             # -----------------------------
-            # CALCULATION LOGIC
+            # CORE CALCULATIONS
             # -----------------------------
             S_I = impact_scores[impact]
             S_U = urgency_scores[urgency]
             S_E = escalation_scores[escalation]
 
             # Workload scoring
-            S_WV = min(workload_3m / 25000, 4)
-            S_TW = team_workload / 25
+            S_WV = min(workload_3m / 25000, 4)  # Normalized 0–4
+            S_TW = team_workload / 25          # Normalized 0–4
 
-            # Weighted components
+            # Weighted calculations
             W_I = S_I * 0.55
             W_U = S_U * 0.20
             W_E = S_E * 0.10
@@ -105,7 +137,7 @@ with right:
 
             total_score = W_I + W_U + W_E + W_WV + W_TW
 
-            # Priority assignment
+            # Priority decision tree
             if total_score >= 3.5:
                 priority = "P0: IMMEDIATE"
             elif total_score >= 2.8:
@@ -118,7 +150,7 @@ with right:
                 priority = "P4: BACKLOG"
 
             # -----------------------------
-            # OUTPUT
+            # OUTPUT PANEL
             # -----------------------------
             st.success(f"### Final Priority: **{priority}**")
 
@@ -132,6 +164,7 @@ with right:
             st.write(f"---\n### **Total Score: {total_score:.2f}**")
 
             st.write("### Contextual Data")
+            st.write(f"- RPA: {rpa}")
             st.write(f"- Workload Handled (3M): {workload_3m}")
             st.write(f"- Team Workload %: {team_workload}")
             st.write(f"- Request ID / Title: {request_id}")
