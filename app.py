@@ -1,104 +1,131 @@
 import streamlit as st
 
-st.set_page_config(page_title="Change Request Prioritization Engine", layout="centered")
+st.set_page_config(layout="wide")
 
-st.title("🔧 Change Request Prioritization Engine")
-st.markdown("Use the form below to calculate a priority score (P0–P4).")
+# ---------------------------
+# Priority Calculation Logic
+# ---------------------------
+def calculate_priority(impact_desc, urgency_desc, escalation_level, workload_3m, workload_pct):
+    # Convert descriptions into numeric weights
+    impact_weights = {
+        "Low": 1,
+        "Medium": 2,
+        "High": 3,
+        "Critical": 4,
+    }
+    urgency_weights = {
+        "Low": 1,
+        "Medium": 2,
+        "High": 3,
+        "Critical": 4,
+    }
+    escalation_weights = {
+        "None": 0,
+        "L1": 1,
+        "L2": 2,
+        "L3": 3,
+    }
 
-# -----------------------------
-# LOOKUP TABLES
-# -----------------------------
+    impact_value = impact_weights.get(impact_desc, 0)
+    urgency_value = urgency_weights.get(urgency_desc, 0)
+    escalation_value = escalation_weights.get(escalation_level, 0)
 
-impact_scores = {
-    "Directly blocks revenue / Severe compliance risk": 4,
-    "Significant process improvement / High volume manual work": 3,
-    "Minor bug / Technical debt / Efficiency for small group": 2,
-    "Minor UI/UX change / Nice-to-have": 1
-}
+    # Normalize 3m workload → 0 to 4 scale
+    workload_3m_norm = min(max(workload_3m / 25000, 0), 4)
 
-urgency_scores = {
-    "Imminent fixed deadline / Production blocker (1-2 weeks)": 4,
-    "Time-sensitive process / High workload workaround (3-4 weeks)": 3,
-    "Standard turnaround time / Manageable workaround (1-2 months)": 2,
-    "Future planning / No specific deadline": 1
-}
+    # Normalize workload percentage → 0 to 4 scale
+    workload_pct_norm = min(max(workload_pct / 25, 0), 4)
 
-escalation_scores = {
-    "Director/VP": 4,
-    "Head": 3,
-    "Manager": 2,
-    "Supervisor": 1,
-    "None": 0
-}
+    # Final score formula
+    score = (
+        (impact_value * 0.35) +
+        (urgency_value * 0.35) +
+        (escalation_value * 0.10) +
+        (workload_3m_norm * 0.10) +
+        (workload_pct_norm * 0.10)
+    )
 
-# -----------------------------
-# FORM UI
-# -----------------------------
-
-with st.form("priority_form"):
-    st.subheader("Input Fields")
-
-    request_id = st.text_input("Request ID / Title")
-
-    impact = st.selectbox("Impact Description (Mandatory)", list(impact_scores.keys()))
-    urgency = st.selectbox("Urgency Description (Mandatory)", list(urgency_scores.keys()))
-    escalation = st.selectbox("Escalation Level (Mandatory)", list(escalation_scores.keys()))
-
-    workload_3m = st.number_input("Workload Handled (3M)", min_value=0, max_value=100000, step=1)
-    team_workload = st.number_input("Team Workload %", min_value=0, max_value=100, step=1)
-
-    submitted = st.form_submit_button("Calculate Priority")
-
-# -----------------------------
-# CALCULATION LOGIC
-# -----------------------------
-
-if submitted:
-    S_I = impact_scores[impact]
-    S_U = urgency_scores[urgency]
-    S_E = escalation_scores[escalation]
-
-    # New workload-based scores (corrected to 0–100,000 range)
-    S_WV = min(workload_3m / 25000, 4)  # Normalizes workload to 0–4
-    S_TW = team_workload / 25           # Normalizes team workload % to 0–4
-
-    # Weighted components
-    W_I = S_I * 0.55
-    W_U = S_U * 0.20
-    W_E = S_E * 0.10
-    W_WV = S_WV * 0.10
-    W_TW = S_TW * 0.05
-
-    total_score = W_I + W_U + W_E + W_WV + W_TW
-
-    # Priority assignment
-    if total_score >= 3.5:
-        priority = "P0: IMMEDIATE"
-    elif total_score >= 2.8:
-        priority = "P1: HIGH"
-    elif total_score >= 2.0:
-        priority = "P2: MEDIUM"
-    elif total_score >= 1.4:
-        priority = "P3: LOW"
+    # Priority classification
+    if score >= 3.2:
+        return "🔥 P1 - Critical"
+    elif score >= 2.4:
+        return "⚠️ P2 - High"
+    elif score >= 1.6:
+        return "📌 P3 - Medium"
     else:
-        priority = "P4: BACKLOG"
+        return "🟢 P4 - Low"
 
-    # -----------------------------
-    # OUTPUT
-    # -----------------------------
 
-    st.success(f"### Final Priority: **{priority}**")
+# ---------------------------
+# Streamlit Layout
+# ---------------------------
 
-    st.write("### Calculation Breakdown")
-    st.write(f"- Impact Score: {S_I} → Weighted: {W_I:.2f}")
-    st.write(f"- Urgency Score: {S_U} → Weighted: {W_U:.2f}")
-    st.write(f"- Escalation Score: {S_E} → Weighted: {W_E:.2f}")
-    st.write(f"- Workload Volume Score: {S_WV:.2f} → Weighted: {W_WV:.2f}")
-    st.write(f"- Team Workload Score: {S_TW:.2f} → Weighted: {W_TW:.2f}")
+st.title("Request Priority Calculator")
 
-    st.write(f"---\n### **Total Score: {total_score:.2f}**")
+left, right = st.columns(2)
 
-    st.write("### Contextual Data (Not used directly for the core SI/SU/SE formula)")
-    st.write(f"- Workload Handled (3M): {workload_3m}")
-    st.write(f"- Team Workload %: {team_workload}")
-    st.write(f"- Request ID / Title: {request_id}")
+
+# ---------------------------
+# LEFT SIDE → Inputs
+# ---------------------------
+with left:
+    st.header("Input Fields")
+
+    impact_desc = st.selectbox(
+        "Impact Description (mandatory)",
+        ["", "Low", "Medium", "High", "Critical"],
+        index=0,
+        help="Select how impactful the issue is"
+    )
+
+    urgency_desc = st.selectbox(
+        "Urgency Description (mandatory)",
+        ["", "Low", "Medium", "High", "Critical"],
+        index=0,
+        help="Select how urgent the issue is"
+    )
+
+    escalation_level = st.selectbox(
+        "Escalation Level (mandatory)",
+        ["None", "L1", "L2", "L3"],
+        index=0,
+        help="Select escalation level"
+    )
+
+    workload_3m = st.number_input(
+        "3-Month Workload (0 to 100,000)",
+        min_value=0,
+        max_value=100000,
+        value=0
+    )
+
+    workload_pct = st.slider(
+        "Current Workload (%)",
+        0, 100, 0
+    )
+
+    # Validation
+    if impact_desc == "" or urgency_desc == "":
+        st.warning("Please select both Impact Description and Urgency Description to continue.")
+
+
+# ---------------------------
+# RIGHT SIDE → Output
+# ---------------------------
+with right:
+    st.header("Priority Output")
+
+    if impact_desc != "" and urgency_desc != "":
+        priority = calculate_priority(
+            impact_desc,
+            urgency_desc,
+            escalation_level,
+            workload_3m,
+            workload_pct
+        )
+
+        st.subheader("Priority Result")
+        st.success(priority)
+
+    else:
+        st.info("Priority will appear here once all mandatory fields are populated.")
